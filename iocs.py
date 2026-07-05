@@ -24,7 +24,7 @@ def get_standard_label(raw_label):
     if any(x in label for x in ["sender", "from"]): return "mailsender"
     if any(x in label for x in ["subject", "title"]): return "subject"
     
-    # FIX: Separated "path" out into its own dedicated string type
+    # Separated "path" out into its own dedicated string type
     if any(x in label for x in ["file path", "path"]): return "filepath"
     
     if any(x in label for x in ["file"]): return "file"
@@ -48,7 +48,6 @@ CONFIG = {
     'file':       {'col': 'Filename', 'cat': 'FileArtifacts', 'is_ilike': False, 'can_ref_set': False},
     'filename':   {'col': 'Filename', 'cat': 'FileArtifacts', 'is_ilike': False, 'can_ref_set': False},
     
-    # FIX: Added specific rules for path checking. 
     # Adjust 'col': 'FilePath' to the exact custom property name your QRadar environment uses for file paths.
     'filepath':   {'col': 'FilePath', 'cat': 'FileArtifacts', 'is_ilike': True, 'can_ref_set': False}
 }
@@ -135,8 +134,8 @@ if uploaded_file:
             st.write("### Processed IOC Preview")
             st.dataframe(preview_df)
             
-            # FIX: Export formatted CSV containing the processed indicators
-            csv_output = preview_df.to_csv(index=False)
+            # FIX: Added 'utf-8-sig' to support Arabic character rendering in Excel CSV downloads
+            csv_output = preview_df.to_csv(index=False, encoding='utf-8-sig')
             st.download_button(
                 label="📥 Download Defanged/Processed IOCs (.csv)",
                 data=csv_output,
@@ -149,7 +148,7 @@ if uploaded_file:
             df_hashes = pd.DataFrame(all_hashes, columns=['Hash'])
             st.sidebar.download_button(
                 label=f"📥 Export {ref_set_name}.csv",
-                data=df_hashes.to_csv(index=False),
+                data=df_hashes.to_csv(index=False, encoding='utf-8-sig'),
                 file_name=f"{ref_set_name}.csv",
                 mime="text/csv"
             )
