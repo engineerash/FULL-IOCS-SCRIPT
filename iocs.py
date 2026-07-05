@@ -1,6 +1,7 @@
 import streamlit as st
 from collections import defaultdict
 import os
+import io
 import pandas as pd
 from ioc_fanger import fang
 
@@ -15,14 +16,12 @@ uploaded_file = st.file_uploader("Upload your IOC file", type=['csv', 'txt', 'xl
 # Checkbox to let you choose if you want to defang and normalize types first
 apply_defang = st.checkbox("Apply Defanging & Type Standardization", value=True)
 
-# FIX: Deep-cleaning function to aggressive reverse multi-stage Excel corruption strings
+# Function to repair double-encoded/broken Arabic characters (Ø£Ø¬Ù†Ø¯Ø© -> Arabic)
 def repair_arabic_text(text):
     if not isinstance(text, str):
         return text
     
-    # Test if string contains signature Mojibake artifacts
     if any(char in text for char in ["Ø", "Ù", " ", "â", "ã", "å", "æ"]):
-        # Try different encoding correction combinations
         encodings_to_try = [
             ('cp1252', 'utf-8'),
             ('latin1', 'utf-8'),
@@ -32,7 +31,6 @@ def repair_arabic_text(text):
         for enc, dec in encodings_to_try:
             try:
                 repaired = text.encode(enc).decode(dec)
-                # Quick verification if it successfully converted back to Arabic characters
                 if any('\u0600' <= c <= '\u06FF' for c in repaired):
                     return repaired
             except Exception:
@@ -101,13 +99,11 @@ if uploaded_file:
         # --- PHASE 1: Data Ingestion & Optional Processing ---
         raw_rows = []
         
-        # Parse Excel files
         if uploaded_file.name.endswith('.xlsx'):
             df = pd.read_excel(uploaded_file, header=None)
             for _, row in df.iterrows():
                 if len(row) >= 2 and pd.notna(row[0]) and pd.notna(row[1]):
                     raw_rows.append((str(row[0]), str(row[1])))
-        # Parse Text/CSV files
         else:
             file_bytes = uploaded_file.read()
             content = None
@@ -132,7 +128,7 @@ if uploaded_file:
         for raw_type, raw_value in raw_rows:
             if str(raw_value).lower() == 'nan': continue
             
-            # Dynamic string reconstruction for Arabic fields
+            # Reconstruct Arabic fields
             raw_type = repair_arabic_text(raw_type)
             raw_value = repair_arabic_text(raw_value)
             
@@ -162,22 +158,30 @@ if uploaded_file:
             st.write("### Processed IOC Preview")
             st.dataframe(preview_df)
             
-            csv_output = preview_df.to_csv(index=False, encoding='utf-8-sig')
+            # FIX: Generates a native Excel workbook layout in-memory to safely retain the Arabic characters.
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                preview_df.to_excel(writer, index=False, sheet_name='Defanged IOCs')
+            
             st.download_button(
-                label="📥 Download Defanged/Processed IOCs (.csv)",
-                data=csv_output,
-                file_name=f"processed_{file_basename}.csv",
-                mime="text/csv"
+                label="📥 Download Defanged/Processed IOCs (.xlsx)",
+                data=excel_buffer.getvalue(),
+                file_name=f"processed_{file_basename}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-        # Handle Reference Set Exports
+        # Handle Reference Set Exports (Also converted to native Excel format for compatibility)
         if all_hashes:
             df_hashes = pd.DataFrame(all_hashes, columns=['Hash'])
+            hash_buffer = io.BytesIO()
+            with pd.ExcelWriter(hash_buffer, engine='openpyxl') as writer:
+                df_hashes.to_excel(writer, index=False, sheet_name='Hashes')
+                
             st.sidebar.download_button(
-                label=f"📥 Export {ref_set_name}.csv",
-                data=df_hashes.to_csv(index=False, encoding='utf-8-sig'),
-                file_name=f"{ref_set_name}.csv",
-                mime="text/csv"
+                label=f"📥 Export {ref_set_name}.xlsx",
+                data=hash_buffer.getvalue(),
+                file_name=f"{ref_set_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
         # Generate Queries
