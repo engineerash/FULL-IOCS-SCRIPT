@@ -16,21 +16,26 @@ uploaded_file = st.file_uploader("Upload your IOC file", type=['csv', 'txt', 'xl
 # Checkbox to let you choose if you want to defang and normalize types first
 apply_defang = st.checkbox("Apply Defanging & Type Standardization", value=True)
 
-# Function to repair double-encoded/broken Arabic characters (Ø£Ø¬Ù†Ø¯Ø© -> Arabic)
+# FIX: Aggressive multi-codec reconstruction specifically targeting 'ظ', 'Ø', ' ' signatures
 def repair_arabic_text(text):
     if not isinstance(text, str):
         return text
     
-    if any(char in text for char in ["Ø", "Ù", " ", "â", "ã", "å", "æ"]):
+    # Check if the text matches the exact Mojibake corruption signatures from your Streamlit UI
+    if any(char in text for char in ["ظ", "Ø", " ", "â", "ã", "å", "æ", ""]):
+        # Comprehensive list of possible extraction corruption combinations
         encodings_to_try = [
-            ('cp1252', 'utf-8'),
-            ('latin1', 'utf-8'),
-            ('utf-8', 'cp1256'),
-            ('latin1', 'cp1256')
+            ('cp1256', 'utf-8'),      # Windows Arabic back to UTF-8
+            ('utf-8', 'cp1256'),      # UTF-8 back to Windows Arabic
+            ('cp1252', 'utf-8'),      # Windows Western back to UTF-8
+            ('latin1', 'utf-8'),      # Latin-1 back to UTF-8
+            ('latin1', 'cp1256'),     # Latin-1 back to Windows Arabic
+            ('cp1256', 'latin1'),     # Windows Arabic back to Latin-1
         ]
         for enc, dec in encodings_to_try:
             try:
-                repaired = text.encode(enc).decode(dec)
+                repaired = text.encode(enc).decode(dec, errors='ignore')
+                # Strict check: only return if it contains valid Arabic unicode block range
                 if any('\u0600' <= c <= '\u06FF' for c in repaired):
                     return repaired
             except Exception:
@@ -107,7 +112,7 @@ if uploaded_file:
         else:
             file_bytes = uploaded_file.read()
             content = None
-            for encoding_type in ['utf-8-sig', 'utf-8', 'latin1', 'cp1256', 'windows-1256']:
+            for encoding_type in ['utf-8-sig', 'utf-8', 'cp1256', 'windows-1256', 'latin1']:
                 try:
                     content = file_bytes.decode(encoding_type)
                     break
@@ -158,7 +163,6 @@ if uploaded_file:
             st.write("### Processed IOC Preview")
             st.dataframe(preview_df)
             
-            # FIX: Generates a native Excel workbook layout in-memory to safely retain the Arabic characters.
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 preview_df.to_excel(writer, index=False, sheet_name='Defanged IOCs')
@@ -170,7 +174,7 @@ if uploaded_file:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-        # Handle Reference Set Exports (Also converted to native Excel format for compatibility)
+        # Handle Reference Set Exports
         if all_hashes:
             df_hashes = pd.DataFrame(all_hashes, columns=['Hash'])
             hash_buffer = io.BytesIO()
