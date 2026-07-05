@@ -1,6 +1,7 @@
 import streamlit as st
 from collections import defaultdict
 import os
+import io
 import pandas as pd
 from ioc_fanger import fang
 
@@ -85,7 +86,6 @@ if uploaded_file:
         else:
             file_bytes = uploaded_file.read()
             content = None
-            # Standard sequential decoding strategy without manipulation
             for encoding_type in ['utf-8-sig', 'utf-8', 'cp1256', 'windows-1256', 'latin1']:
                 try:
                     content = file_bytes.decode(encoding_type)
@@ -133,22 +133,31 @@ if uploaded_file:
             st.write("### Processed IOC Preview")
             st.dataframe(preview_df)
             
-            csv_output = preview_df.to_csv(index=False, encoding='utf-8-sig')
+            # EXCEL FIX: Build an in-memory .xlsx file buffer 
+            # This protects the Arabic strings from local PC CSV mapping bugs
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                preview_df.to_excel(writer, index=False, sheet_name='Processed IOCs')
+            
             st.download_button(
-                label="📥 Download Defanged/Processed IOCs (.csv)",
-                data=csv_output,
-                file_name=f"processed_{file_basename}.csv",
-                mime="text/csv"
+                label="📥 Download Defanged/Processed IOCs (.xlsx)",
+                data=excel_buffer.getvalue(),
+                file_name=f"processed_{file_basename}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-        # Handle Reference Set Exports
+        # Handle Reference Set Exports (Also using Excel structure)
         if all_hashes:
             df_hashes = pd.DataFrame(all_hashes, columns=['Hash'])
+            hash_buffer = io.BytesIO()
+            with pd.ExcelWriter(hash_buffer, engine='openpyxl') as writer:
+                df_hashes.to_excel(writer, index=False, sheet_name='Hashes')
+                
             st.sidebar.download_button(
-                label=f"📥 Export {ref_set_name}.csv",
-                data=df_hashes.to_csv(index=False, encoding='utf-8-sig'),
-                file_name=f"{ref_set_name}.csv",
-                mime="text/csv"
+                label=f"📥 Export {ref_set_name}.xlsx",
+                data=hash_buffer.getvalue(),
+                file_name=f"{ref_set_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
         # Generate Queries
