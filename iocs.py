@@ -124,12 +124,25 @@ if uploaded_file:
                     all_hashes.append(clean_value)
 
         # --- PHASE 2: UI Visualizations & Actions ---
-        if apply_defang and indicators:
-            st.success("✨ Successfully standardized and defanged data!")
+        if indicators:
+            if apply_defang:
+                st.success("✨ Successfully standardized and defanged data!")
+            
             # Display a quick scannable preview table of what was processed
             preview_data = [{"Value": val, "Type": key.upper()} for key, vals in indicators.items() for val in vals]
+            preview_df = pd.DataFrame(preview_data)
+            
             st.write("### Processed IOC Preview")
-            st.dataframe(pd.DataFrame(preview_data))
+            st.dataframe(preview_df)
+            
+            # FIX: Export formatted CSV containing the processed indicators
+            csv_output = preview_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Defanged/Processed IOCs (.csv)",
+                data=csv_output,
+                file_name=f"processed_{file_basename}.csv",
+                mime="text/csv"
+            )
 
         # Handle Reference Set Exports
         if all_hashes:
