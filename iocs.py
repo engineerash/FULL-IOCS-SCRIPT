@@ -23,7 +23,10 @@ def get_standard_label(raw_label):
     if any(x in label for x in ["sha256"]): return "sha256"
     if any(x in label for x in ["sender", "from"]): return "mailsender"
     if any(x in label for x in ["subject", "title"]): return "subject"
-    if any(x in label for x in ["file path", "path"]): return "filename"  # Mapped to match CONFIG keys
+    
+    # FIX: Separated "path" out into its own dedicated string type
+    if any(x in label for x in ["file path", "path"]): return "filepath"
+    
     if any(x in label for x in ["file"]): return "file"
     if any(x in label for x in ["ip", "address"]): return "ip address"
     if any(x in label for x in ["fqdn", "domain"]): return "fqdn"
@@ -43,7 +46,11 @@ CONFIG = {
     'ip':         {'col': 'sourceIP', 'cat': 'IP', 'is_ilike': False, 'can_ref_set': True},
     'ip address': {'col': 'sourceIP', 'cat': 'IP', 'is_ilike': False, 'can_ref_set': True},
     'file':       {'col': 'Filename', 'cat': 'FileArtifacts', 'is_ilike': False, 'can_ref_set': False},
-    'filename':   {'col': 'Filename', 'cat': 'FileArtifacts', 'is_ilike': False, 'can_ref_set': False}
+    'filename':   {'col': 'Filename', 'cat': 'FileArtifacts', 'is_ilike': False, 'can_ref_set': False},
+    
+    # FIX: Added specific rules for path checking. 
+    # Adjust 'col': 'FilePath' to the exact custom property name your QRadar environment uses for file paths.
+    'filepath':   {'col': 'FilePath', 'cat': 'FileArtifacts', 'is_ilike': True, 'can_ref_set': False}
 }
 
 def get_chunks(vals, conf, base_query, limit=2023):
