@@ -15,6 +15,18 @@ uploaded_file = st.file_uploader("Upload your IOC file", type=['csv', 'txt', 'xl
 # Checkbox to let you choose if you want to defang and normalize types first
 apply_defang = st.checkbox("Apply Defanging & Type Standardization", value=True)
 
+# FIX: Function to repair double-encoded/broken Arabic characters (Ø£Ø¬Ù†Ø¯Ø© -> Arabic)
+def repair_arabic_text(text):
+    if not isinstance(text, str):
+        return text
+    try:
+        # If it looks like Mojibake corruption, reverse it
+        if "Ø" in text or "Ù" in text or " " in text:
+            return text.encode('cp1252').decode('utf-8')
+    except Exception:
+        pass
+    return text
+
 # Define target types mapping for QRadar AQL schema compatibility
 def get_standard_label(raw_label):
     label = str(raw_label).lower().replace("_", " ").strip()
@@ -23,10 +35,7 @@ def get_standard_label(raw_label):
     if any(x in label for x in ["sha256"]): return "sha256"
     if any(x in label for x in ["sender", "from"]): return "mailsender"
     if any(x in label for x in ["subject", "title"]): return "subject"
-    
-    # Separated "path" out into its own dedicated string type
     if any(x in label for x in ["file path", "path"]): return "filepath"
-    
     if any(x in label for x in ["file"]): return "file"
     if any(x in label for x in ["ip", "address"]): return "ip address"
     if any(x in label for x in ["fqdn", "domain"]): return "fqdn"
@@ -89,9 +98,8 @@ if uploaded_file:
         # Parse Text/CSV files
         else:
             file_bytes = uploaded_file.read()
-            # FIX: Dynamically try common Arabic & UTF encodings to read input correctly
             content = None
-            for encoding_type in ['utf-8-sig', 'utf-8', 'cp1256', 'windows-1256']:
+            for encoding_type in ['utf-8-sig', 'utf-8', 'latin1', 'cp1256']:
                 try:
                     content = file_bytes.decode(encoding_type)
                     break
@@ -99,18 +107,22 @@ if uploaded_file:
                     continue
             
             if content is None:
-                st.error("Could not parse file text encoding. Try saving your source file as standard CSV UTF-8.")
+                st.error("Could not parse file text encoding.")
                 st.stop()
 
             for line in content.strip().split('\n'):
                 if not line or ',' not in line: continue
                 parts = [x.strip() for x in line.rsplit(',', 1)]
                 if len(parts) == 2:
-                    raw_rows.append((parts[1], parts[0])) # (type/label, value)
+                    raw_rows.append((parts[1], parts[0]))
         
         # Process rows based on the checkbox setting
         for raw_type, raw_value in raw_rows:
             if str(raw_value).lower() == 'nan': continue
+            
+            # Run the dynamic text repair fix on both properties
+            raw_type = repair_arabic_text(raw_type)
+            raw_value = repair_arabic_text(raw_value)
             
             if apply_defang:
                 clean_type = get_standard_label(raw_type)
@@ -130,7 +142,7 @@ if uploaded_file:
         # --- PHASE 2: UI Visualizations & Actions ---
         if indicators:
             if apply_defang:
-                st.success("✨ Successfully standardized and defanged data!")
+                st.success("✨ Successfully standardized, fixed Arabic text, and defanged data!")
             
             preview_data = [{"Value": val, "Type": key.upper()} for key, vals in indicators.items() for val in vals]
             preview_df = pd.DataFrame(preview_data)
