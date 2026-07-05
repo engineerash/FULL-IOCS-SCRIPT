@@ -15,16 +15,28 @@ uploaded_file = st.file_uploader("Upload your IOC file", type=['csv', 'txt', 'xl
 # Checkbox to let you choose if you want to defang and normalize types first
 apply_defang = st.checkbox("Apply Defanging & Type Standardization", value=True)
 
-# FIX: Function to repair double-encoded/broken Arabic characters (Ø£Ø¬Ù†Ø¯Ø© -> Arabic)
+# FIX: Deep-cleaning function to aggressive reverse multi-stage Excel corruption strings
 def repair_arabic_text(text):
     if not isinstance(text, str):
         return text
-    try:
-        # If it looks like Mojibake corruption, reverse it
-        if "Ø" in text or "Ù" in text or " " in text:
-            return text.encode('cp1252').decode('utf-8')
-    except Exception:
-        pass
+    
+    # Test if string contains signature Mojibake artifacts
+    if any(char in text for char in ["Ø", "Ù", " ", "â", "ã", "å", "æ"]):
+        # Try different encoding correction combinations
+        encodings_to_try = [
+            ('cp1252', 'utf-8'),
+            ('latin1', 'utf-8'),
+            ('utf-8', 'cp1256'),
+            ('latin1', 'cp1256')
+        ]
+        for enc, dec in encodings_to_try:
+            try:
+                repaired = text.encode(enc).decode(dec)
+                # Quick verification if it successfully converted back to Arabic characters
+                if any('\u0600' <= c <= '\u06FF' for c in repaired):
+                    return repaired
+            except Exception:
+                continue
     return text
 
 # Define target types mapping for QRadar AQL schema compatibility
@@ -99,7 +111,7 @@ if uploaded_file:
         else:
             file_bytes = uploaded_file.read()
             content = None
-            for encoding_type in ['utf-8-sig', 'utf-8', 'latin1', 'cp1256']:
+            for encoding_type in ['utf-8-sig', 'utf-8', 'latin1', 'cp1256', 'windows-1256']:
                 try:
                     content = file_bytes.decode(encoding_type)
                     break
@@ -120,7 +132,7 @@ if uploaded_file:
         for raw_type, raw_value in raw_rows:
             if str(raw_value).lower() == 'nan': continue
             
-            # Run the dynamic text repair fix on both properties
+            # Dynamic string reconstruction for Arabic fields
             raw_type = repair_arabic_text(raw_type)
             raw_value = repair_arabic_text(raw_value)
             
