@@ -47,8 +47,6 @@ CONFIG = {
     'ip address': {'col': 'sourceIP', 'cat': 'IP', 'is_ilike': False, 'can_ref_set': True},
     'file':       {'col': 'Filename', 'cat': 'FileArtifacts', 'is_ilike': False, 'can_ref_set': False},
     'filename':   {'col': 'Filename', 'cat': 'FileArtifacts', 'is_ilike': False, 'can_ref_set': False},
-    
-    # Adjust 'col': 'FilePath' to the exact custom property name your QRadar environment uses for file paths.
     'filepath':   {'col': 'FilePath', 'cat': 'FileArtifacts', 'is_ilike': True, 'can_ref_set': False}
 }
 
@@ -90,7 +88,20 @@ if uploaded_file:
                     raw_rows.append((str(row[0]), str(row[1])))
         # Parse Text/CSV files
         else:
-            content = uploaded_file.read().decode("utf-8")
+            file_bytes = uploaded_file.read()
+            # FIX: Dynamically try common Arabic & UTF encodings to read input correctly
+            content = None
+            for encoding_type in ['utf-8-sig', 'utf-8', 'cp1256', 'windows-1256']:
+                try:
+                    content = file_bytes.decode(encoding_type)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if content is None:
+                st.error("Could not parse file text encoding. Try saving your source file as standard CSV UTF-8.")
+                st.stop()
+
             for line in content.strip().split('\n'):
                 if not line or ',' not in line: continue
                 parts = [x.strip() for x in line.rsplit(',', 1)]
@@ -102,21 +113,15 @@ if uploaded_file:
             if str(raw_value).lower() == 'nan': continue
             
             if apply_defang:
-                # 1. Standardize label
                 clean_type = get_standard_label(raw_type)
-                # 2. Defang the indicator value
                 clean_value = fang(str(raw_value))
-                # 3. Clean up legacy defanging artifacts for FQDNs
                 if clean_type in ["fqdn", "domain"]:
                     clean_value = clean_value.replace("[", "").replace("]", "")
             else:
-                # Keep everything raw as found in the file
                 clean_type = raw_type.lower().strip()
                 clean_value = raw_value.strip()
 
-            # Group the values if they match valid configuration categories
             if clean_type in CONFIG:
-                # Prevent duplicate entries in the same category
                 if clean_value not in indicators[clean_type]:
                     indicators[clean_type].append(clean_value)
                 if clean_type in ['md5', 'sha256', 'sha1'] and clean_value not in all_hashes:
@@ -127,14 +132,12 @@ if uploaded_file:
             if apply_defang:
                 st.success("✨ Successfully standardized and defanged data!")
             
-            # Display a quick scannable preview table of what was processed
             preview_data = [{"Value": val, "Type": key.upper()} for key, vals in indicators.items() for val in vals]
             preview_df = pd.DataFrame(preview_data)
             
             st.write("### Processed IOC Preview")
             st.dataframe(preview_df)
             
-            # FIX: Added 'utf-8-sig' to support Arabic character rendering in Excel CSV downloads
             csv_output = preview_df.to_csv(index=False, encoding='utf-8-sig')
             st.download_button(
                 label="📥 Download Defanged/Processed IOCs (.csv)",
