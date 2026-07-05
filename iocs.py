@@ -1,7 +1,6 @@
 import streamlit as st
 from collections import defaultdict
 import os
-import io
 import pandas as pd
 from ioc_fanger import fang
 
@@ -15,32 +14,6 @@ uploaded_file = st.file_uploader("Upload your IOC file", type=['csv', 'txt', 'xl
 
 # Checkbox to let you choose if you want to defang and normalize types first
 apply_defang = st.checkbox("Apply Defanging & Type Standardization", value=True)
-
-# FIX: Aggressive multi-codec reconstruction specifically targeting 'ظ', 'Ø', ' ' signatures
-def repair_arabic_text(text):
-    if not isinstance(text, str):
-        return text
-    
-    # Check if the text matches the exact Mojibake corruption signatures from your Streamlit UI
-    if any(char in text for char in ["ظ", "Ø", " ", "â", "ã", "å", "æ", ""]):
-        # Comprehensive list of possible extraction corruption combinations
-        encodings_to_try = [
-            ('cp1256', 'utf-8'),      # Windows Arabic back to UTF-8
-            ('utf-8', 'cp1256'),      # UTF-8 back to Windows Arabic
-            ('cp1252', 'utf-8'),      # Windows Western back to UTF-8
-            ('latin1', 'utf-8'),      # Latin-1 back to UTF-8
-            ('latin1', 'cp1256'),     # Latin-1 back to Windows Arabic
-            ('cp1256', 'latin1'),     # Windows Arabic back to Latin-1
-        ]
-        for enc, dec in encodings_to_try:
-            try:
-                repaired = text.encode(enc).decode(dec, errors='ignore')
-                # Strict check: only return if it contains valid Arabic unicode block range
-                if any('\u0600' <= c <= '\u06FF' for c in repaired):
-                    return repaired
-            except Exception:
-                continue
-    return text
 
 # Define target types mapping for QRadar AQL schema compatibility
 def get_standard_label(raw_label):
@@ -101,7 +74,7 @@ if uploaded_file:
     all_hashes = [] 
     
     try:
-        # --- PHASE 1: Data Ingestion & Optional Processing ---
+        # --- DATA INGESTION ---
         raw_rows = []
         
         if uploaded_file.name.endswith('.xlsx'):
@@ -112,6 +85,7 @@ if uploaded_file:
         else:
             file_bytes = uploaded_file.read()
             content = None
+            # Standard sequential decoding strategy without manipulation
             for encoding_type in ['utf-8-sig', 'utf-8', 'cp1256', 'windows-1256', 'latin1']:
                 try:
                     content = file_bytes.decode(encoding_type)
@@ -129,13 +103,9 @@ if uploaded_file:
                 if len(parts) == 2:
                     raw_rows.append((parts[1], parts[0]))
         
-        # Process rows based on the checkbox setting
+        # --- EXTRACTION PROCESSING ---
         for raw_type, raw_value in raw_rows:
             if str(raw_value).lower() == 'nan': continue
-            
-            # Reconstruct Arabic fields
-            raw_type = repair_arabic_text(raw_type)
-            raw_value = repair_arabic_text(raw_value)
             
             if apply_defang:
                 clean_type = get_standard_label(raw_type)
@@ -152,10 +122,10 @@ if uploaded_file:
                 if clean_type in ['md5', 'sha256', 'sha1'] and clean_value not in all_hashes:
                     all_hashes.append(clean_value)
 
-        # --- PHASE 2: UI Visualizations & Actions ---
+        # --- UI DISPLAY & EXPORT ---
         if indicators:
             if apply_defang:
-                st.success("✨ Successfully standardized, fixed Arabic text, and defanged data!")
+                st.success("✨ Data standardized and parsed successfully!")
             
             preview_data = [{"Value": val, "Type": key.upper()} for key, vals in indicators.items() for val in vals]
             preview_df = pd.DataFrame(preview_data)
@@ -163,29 +133,22 @@ if uploaded_file:
             st.write("### Processed IOC Preview")
             st.dataframe(preview_df)
             
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                preview_df.to_excel(writer, index=False, sheet_name='Defanged IOCs')
-            
+            csv_output = preview_df.to_csv(index=False, encoding='utf-8-sig')
             st.download_button(
-                label="📥 Download Defanged/Processed IOCs (.xlsx)",
-                data=excel_buffer.getvalue(),
-                file_name=f"processed_{file_basename}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                label="📥 Download Defanged/Processed IOCs (.csv)",
+                data=csv_output,
+                file_name=f"processed_{file_basename}.csv",
+                mime="text/csv"
             )
 
         # Handle Reference Set Exports
         if all_hashes:
             df_hashes = pd.DataFrame(all_hashes, columns=['Hash'])
-            hash_buffer = io.BytesIO()
-            with pd.ExcelWriter(hash_buffer, engine='openpyxl') as writer:
-                df_hashes.to_excel(writer, index=False, sheet_name='Hashes')
-                
             st.sidebar.download_button(
-                label=f"📥 Export {ref_set_name}.xlsx",
-                data=hash_buffer.getvalue(),
-                file_name=f"{ref_set_name}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                label=f"📥 Export {ref_set_name}.csv",
+                data=df_hashes.to_csv(index=False, encoding='utf-8-sig'),
+                file_name=f"{ref_set_name}.csv",
+                mime="text/csv"
             )
 
         # Generate Queries
