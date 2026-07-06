@@ -10,7 +10,8 @@ st.set_page_config(page_title="SOC Unified IOC Tool", layout="wide", page_icon="
 st.title("🛡️ SOC Hunting: Multi-Client AQL Generator & Parser")
 
 # 2. Sidebar / Top level Configuration
-client = st.selectbox("Select Client", ["Tarshid", "Alraedah"])
+# Added "SHL" to the client list
+client = st.selectbox("Select Client", ["Tarshid", "Alraedah", "SHL"])
 uploaded_file = st.file_uploader("Upload your IOC file", type=['csv', 'txt', 'xlsx'])
 
 # Checkbox to let you choose if you want to defang and normalize types first
@@ -133,8 +134,7 @@ if uploaded_file:
             st.write("### Processed IOC Preview")
             st.dataframe(preview_df)
             
-            # EXCEL FIX: Build an in-memory .xlsx file buffer 
-            # This protects the Arabic strings from local PC CSV mapping bugs
+            # Excel export buffer
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 preview_df.to_excel(writer, index=False, sheet_name='Processed IOCs')
@@ -146,7 +146,7 @@ if uploaded_file:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-        # Handle Reference Set Exports (Also using Excel structure)
+        # Handle Reference Set Exports
         if all_hashes:
             df_hashes = pd.DataFrame(all_hashes, columns=['Hash'])
             hash_buffer = io.BytesIO()
@@ -160,7 +160,8 @@ if uploaded_file:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-        # Generate Queries
+        # --- GENERATE QUERIES ---
+        # Adjusted logic: Only Tarshid gets the domain filter constraint. Alraedah and SHL pass cleanly.
         domain_filter = ' WHERE "domainId"=\'3\' AND ' if client == "Tarshid" else ' WHERE '
         st.subheader(f"Generated Queries for {client}")
 
