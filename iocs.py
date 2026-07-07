@@ -10,7 +10,6 @@ st.set_page_config(page_title="SOC Unified IOC Tool", layout="wide", page_icon="
 st.title("🛡️ SOC Hunting: Multi-Client Query Generator & Parser")
 
 # 2. Sidebar / Top level Configuration
-# Added "AJIL" to the client list
 client = st.selectbox("Select Client", ["Tarshid", "Alraedah", "SHL", "AJIL"])
 uploaded_file = st.file_uploader("Upload your IOC file", type=['csv', 'txt', 'xlsx'])
 
@@ -155,7 +154,7 @@ if uploaded_file:
             st.sidebar.download_button(
                 label=f"📥 Export {ref_set_name}.xlsx",
                 data=hash_buffer.getvalue(),
-                file_name={ref_set_name}.xlsx",
+                file_name=f"{ref_set_name}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
