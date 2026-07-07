@@ -7,17 +7,17 @@ from ioc_fanger import fang
 
 # 1. Page Configuration
 st.set_page_config(page_title="SOC Unified IOC Tool", layout="wide", page_icon="🛡️")
-st.title("🛡️ SOC Hunting: Multi-Client AQL Generator & Parser")
+st.title("🛡️ SOC Hunting: Multi-Client Query Generator & Parser")
 
 # 2. Sidebar / Top level Configuration
-# Added "SHL" to the client list
-client = st.selectbox("Select Client", ["Tarshid", "Alraedah", "SHL"])
+# Added "AJIL" to the client list
+client = st.selectbox("Select Client", ["Tarshid", "Alraedah", "SHL", "AJIL"])
 uploaded_file = st.file_uploader("Upload your IOC file", type=['csv', 'txt', 'xlsx'])
 
 # Checkbox to let you choose if you want to defang and normalize types first
 apply_defang = st.checkbox("Apply Defanging & Type Standardization", value=True)
 
-# Define target types mapping for QRadar AQL schema compatibility
+# Define target types mapping for QRadar/Splunk schema compatibility
 def get_standard_label(raw_label):
     label = str(raw_label).lower().replace("_", " ").strip()
     if any(x in label for x in ["md5"]): return "md5"
@@ -32,7 +32,7 @@ def get_standard_label(raw_label):
     if any(x in label for x in ["url", "link"]): return "url"
     return "other"
 
-# AQL Mapping Config
+# QRadar AQL Mapping Config
 CONFIG = {
     'domain': {'col': 'URL HOST', 'cat': 'Domain', 'is_ilike': True, 'can_ref_set': False},
     'fqdn':   {'col': 'URL HOST', 'cat': 'Domain', 'is_ilike': True, 'can_ref_set': False},
@@ -134,7 +134,6 @@ if uploaded_file:
             st.write("### Processed IOC Preview")
             st.dataframe(preview_df)
             
-            # Excel export buffer
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 preview_df.to_excel(writer, index=False, sheet_name='Processed IOCs')
@@ -146,7 +145,7 @@ if uploaded_file:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-        # Handle Reference Set Exports
+        # Handle Reference Set/Hash Exports
         if all_hashes:
             df_hashes = pd.DataFrame(all_hashes, columns=['Hash'])
             hash_buffer = io.BytesIO()
@@ -156,35 +155,57 @@ if uploaded_file:
             st.sidebar.download_button(
                 label=f"📥 Export {ref_set_name}.xlsx",
                 data=hash_buffer.getvalue(),
-                file_name=f"{ref_set_name}.xlsx",
+                file_name={ref_set_name}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
         # --- GENERATE QUERIES ---
-        # Adjusted logic: Only Tarshid gets the domain filter constraint. Alraedah and SHL pass cleanly.
-        domain_filter = ' WHERE "domainId"=\'3\' AND ' if client == "Tarshid" else ' WHERE '
         st.subheader(f"Generated Queries for {client}")
 
-        for label, vals in indicators.items():
-            conf = CONFIG[label]
-            scan_name = f"{file_basename}-HUNT-{conf['cat']}"
-            base_query = f"SELECT '{scan_name}' AS 'Scan Name', QIDNAME(qid) AS 'Event Name', logsourcename(logSourceId) AS 'Log Source', DATEFORMAT(\"startTime\",'yyyy-MM-dd HH:mm:ss') AS 'Time', \"{conf['col']}\" FROM events {domain_filter} "
+        if client == "AJIL":
+            # --- SPLUNK HUNTING LOGIC ---
             
-            with st.expander(f"{label.upper()} ({len(vals)} items)"):
-                result = get_chunks(vals, conf, base_query)
-                if result == "REF_SET":
-                    st.info(f"Query too long. Using Reference Set: {ref_set_name}")
-                    st.code(f"{base_query} (\"{conf['col']}\" IN REFERENCE_SET('{ref_set_name}')) ORDER BY \"startTime\" DESC LAST 90 DAYS", language="sql")
-                else:
-                    for i, chunk in enumerate(result):
-                        if conf['is_ilike']:
-                            cond = " OR ".join([f'"{conf["col"]}" ILIKE \'%{v}%\'' for v in chunk])
-                            query = f"{base_query} ({cond}) ORDER BY \"startTime\" DESC LAST 90 DAYS"
-                        else:
-                            vals_str = ",".join([f"'{v}'" for v in chunk])
-                            query = f"{base_query} (\"{conf['col']}\" IN ({vals_str})) ORDER BY \"startTime\" DESC LAST 90 DAYS"
-                        if len(result) > 1: st.write(f"**Query Part {i+1}**")
-                        st.code(query, language="sql")
+            # 1. Combined Unified Hash Search Box
+            if all_hashes:
+                with st.expander(f"ALL HASHES COMBINED ({len(all_hashes)} items)"):
+                    hash_terms = " OR ".join([f'"{h}"' for h in all_hashes])
+                    splunk_hash_query = f"index=* ({hash_terms})"
+                    st.code(splunk_hash_query, language="spl")
+            
+            # 2. Individual non-hash Splunk Queries
+            for label, vals in indicators.items():
+                if label in ['md5', 'sha256', 'sha1']: 
+                    continue # Skip individual hash printouts since they are combined above
+                    
+                with st.expander(f"{label.upper()} ({len(vals)} items)"):
+                    terms = " OR ".join([f'"{v}"' for v in vals])
+                    splunk_query = f"index=* ({terms})"
+                    st.code(splunk_query, language="spl")
+                    
+        else:
+            # --- QRADAR AQL HUNTING LOGIC (Tarshid, Alraedah, SHL) ---
+            domain_filter = ' WHERE "domainId"=\'3\' AND ' if client == "Tarshid" else ' WHERE '
+
+            for label, vals in indicators.items():
+                conf = CONFIG[label]
+                scan_name = f"{file_basename}-HUNT-{conf['cat']}"
+                base_query = f"SELECT '{scan_name}' AS 'Scan Name', QIDNAME(qid) AS 'Event Name', logsourcename(logSourceId) AS 'Log Source', DATEFORMAT(\"startTime\",'yyyy-MM-dd HH:mm:ss') AS 'Time', \"{conf['col']}\" FROM events {domain_filter} "
+                
+                with st.expander(f"{label.upper()} ({len(vals)} items)"):
+                    result = get_chunks(vals, conf, base_query)
+                    if result == "REF_SET":
+                        st.info(f"Query too long. Using Reference Set: {ref_set_name}")
+                        st.code(f"{base_query} (\"{conf['col']}\" IN REFERENCE_SET('{ref_set_name}')) ORDER BY \"startTime\" DESC LAST 90 DAYS", language="sql")
+                    else:
+                        for i, chunk in enumerate(result):
+                            if conf['is_ilike']:
+                                cond = " OR ".join([f'"{conf["col"]}" ILIKE \'%{v}%\'' for v in chunk])
+                                query = f"{base_query} ({cond}) ORDER BY \"startTime\" DESC LAST 90 DAYS"
+                            else:
+                                vals_str = ",".join([f"'{v}'" for v in chunk])
+                                query = f"{base_query} (\"{conf['col']}\" IN ({vals_str})) ORDER BY \"startTime\" DESC LAST 90 DAYS"
+                            if len(result) > 1: st.write(f"**Query Part {i+1}**")
+                            st.code(query, language="sql")
                         
     except Exception as e:
         st.error(f"Error parsing file data: {e}")
